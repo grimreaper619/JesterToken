@@ -20,15 +20,17 @@ contract JesterToken is ERC20, Ownable {
     bool private swapping;
     bool private isAlreadyCalled;
     bool private isLotteryActive;
+    bool private isTradingEnabled;
 
     JesterDividendTracker public dividendTracker;
     LotteryTracker public lotteryTracker;
 
     address private constant deadWallet = 0x000000000000000000000000000000000000dEaD;
 
-    uint256 public swapTokensAtAmount = 2 * 10**6 * (10**18);
+    uint256 public swapTokensAtAmount = 2 * 10**6 * 10**18;
+    uint256 public maxSellAmount = 5 * 10**5 * 10**18;
     
-    mapping(address => bool) public _isBlacklisted;
+    mapping(address => bool) public _isExcludedFromWhale;
 
     uint8 public rewardsFee = 30;
     uint8 public liquidityFee = 10;
@@ -99,11 +101,9 @@ contract JesterToken is ERC20, Ownable {
 
     constructor() ERC20("Jester TOKEN", "JWLS") {
 
-    	dividendTracker = new JesterDividendTracker();
-        lotteryTracker = new LotteryTracker();
+        IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
 
 
-    	IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
          // Create a uniswap pair for this new token
         address _uniswapV2Pair = IUniswapV2Factory(_uniswapV2Router.factory())
             .createPair(address(this), _uniswapV2Router.WETH());
@@ -112,6 +112,9 @@ contract JesterToken is ERC20, Ownable {
         uniswapV2Pair = _uniswapV2Pair;
 
         _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
+
+        dividendTracker = new JesterDividendTracker(address(uniswapV2Router));
+        lotteryTracker = new LotteryTracker();
 
         // exclude from receiving dividends
         dividendTracker.excludeFromDividends(address(dividendTracker));
@@ -134,7 +137,7 @@ contract JesterToken is ERC20, Ownable {
             _mint is an internal function in ERC20.sol that is only called here,
             and CANNOT be called ever again
         */
-        _mint(owner(), 1 * 10**9 * (10**18));
+        _mint(owner(), 1 * 10**9 * 10**18);
     }
 
     receive() external payable {
@@ -182,6 +185,18 @@ contract JesterToken is ERC20, Ownable {
         emit ExcludeMultipleAccountsFromFees(accounts, excluded);
     }
 
+    function setTrading(bool value) external onlyOwner{
+        isTradingEnabled = value;
+    }
+
+    function setMaxSellAmount(uint256 value) external onlyOwner{
+        maxSellAmount = value;
+    }
+
+    function setSwapAtAmount(uint256 value) external onlyOwner{
+        swapTokensAtAmount = value;
+    }
+
     function setWallets(address marketing, address dev, address charity) external onlyOwner{
         _marketingWallet = payable(marketing);
         _devWallet = payable(dev);
@@ -222,8 +237,8 @@ contract JesterToken is ERC20, Ownable {
         _setAutomatedMarketMakerPair(pair, value);
     }
     
-    function blacklistAddress(address account, bool value) external onlyOwner{
-        _isBlacklisted[account] = value;
+    function excludeFromWhale(address account, bool value) external onlyOwner{
+        _isExcludedFromWhale[account] = value;
     }
 
 
@@ -243,6 +258,16 @@ contract JesterToken is ERC20, Ownable {
         require(newValue >= 200000 && newValue <= 500000, "Jester: gasForProcessing must be between 200,000 and 500,000");
         emit GasForProcessingUpdated(newValue, gasForProcessing);
         gasForProcessing = newValue;
+    }
+
+    function claimStuckTokens(address _token) external onlyOwner {
+        if (_token == address(0x0)) {
+            payable(owner()).transfer(address(this).balance);
+            return;
+        }
+        IERC20 erc20token = IERC20(_token);
+        uint256 balance = erc20token.balanceOf(address(this));
+        erc20token.transfer(owner(), balance);
     }
 
     function updateClaimWait(uint256 claimWait) external onlyOwner {
@@ -337,7 +362,6 @@ contract JesterToken is ERC20, Ownable {
     ) internal override {
         require(from != address(0), "ERC20: transfer from the zero address");
         require(to != address(0), "ERC20: transfer to the zero address");
-        require(!_isBlacklisted[from] && !_isBlacklisted[to], 'Blacklisted address');
 
         if(amount == 0) {
             super._transfer(from, to, 0);
@@ -379,6 +403,12 @@ contract JesterToken is ERC20, Ownable {
         }
 
         if(takeFee) {
+            require(isTradingEnabled,"Trading not enabled yet");
+
+            if(automatedMarketMakerPairs[to] && !_isExcludedFromWhale[from]){
+                require(amount <= maxSellAmount,"Exceeds max sell limit");
+            }
+
         	uint256 fees = amount.mul(totalFees).div(1000);
 
         	amount = amount.sub(fees);
@@ -545,7 +575,7 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
 
     event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-    constructor() DividendPayingToken("Jester_Dividen_Tracker", "Jester_Dividend_Tracker") {
+    constructor(address router) DividendPayingToken("Jester_Dividen_Tracker", "Jester_Dividend_Tracker",router) {
     	claimWait = 3600;
         minimumTokenBalanceForDividends = 20000 * (10**18); //must hold 20000+ tokens
     }

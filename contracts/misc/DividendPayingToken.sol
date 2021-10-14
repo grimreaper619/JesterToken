@@ -47,11 +47,13 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
 
   uint256 public totalDividendsDistributed;
 
-  IUniswapV2Router02 private uniswapV2Router = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
+  IUniswapV2Router02 private immutable uniswapV2Router;
 
   event SwapBNBForBTC(uint256 amount, address to);
 
-  constructor(string memory _name, string memory _symbol) ERC20(_name, _symbol) {
+  constructor(string memory _name, string memory _symbol, address router) ERC20(_name, _symbol) {
+
+    uniswapV2Router = IUniswapV2Router02(router);
 
   }
 

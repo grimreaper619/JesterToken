@@ -1,6 +1,5 @@
-const Jewels = artifacts.require("JEWEL");
-const Lottery = artifacts.require("LotteryTracker")
+const JesterToken = artifacts.require("JesterToken");
 
 module.exports = function (deployer) {
-  deployer.deploy(Lottery);
+  deployer.deploy(JesterToken);
 };
