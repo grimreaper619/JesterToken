@@ -11,7 +11,7 @@ import '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol';
 import "./misc/LotteryTracker.sol";
 
 
-contract JEWEL is ERC20, Ownable {
+contract JesterToken is ERC20, Ownable {
     using SafeMath for uint256;
 
     IUniswapV2Router02 public uniswapV2Router;
@@ -21,27 +21,26 @@ contract JEWEL is ERC20, Ownable {
     bool private isAlreadyCalled;
     bool private isLotteryActive;
 
-    JEWELDividendTracker public dividendTracker;
+    JesterDividendTracker public dividendTracker;
     LotteryTracker public lotteryTracker;
 
     address private constant deadWallet = 0x000000000000000000000000000000000000dEaD;
 
-    address private constant BUSD = address(0xE879D7Ba401b0b8c3ec010001fb95dE120242500); //BUSD
-
-    uint256 public swapTokensAtAmount = 200000 * (10**18);
+    uint256 public swapTokensAtAmount = 2 * 10**6 * (10**18);
     
     mapping(address => bool) public _isBlacklisted;
 
-    uint8 public BUSDRewardsFee = 2;
-    uint8 public liquidityFee = 4;
-    uint8 public marketingFee = 2;
-    uint8 public weekly = 1;
-    uint8 public monthly = 5;
-    uint8 public ultimate = 2;
-    uint16 public lotteryFee = weekly+monthly+ultimate;
-    uint16 public totalFees = BUSDRewardsFee + liquidityFee + marketingFee + lotteryFee;
+    uint8 public rewardsFee = 30;
+    uint8 public liquidityFee = 10;
+    uint8 public marketingFee = 15;
+    uint8 public devFee = 15;
+    uint8 public charityFee = 10;
+    uint16 public lotteryFee = 30;
+    uint16 public totalFees = rewardsFee + liquidityFee + marketingFee + lotteryFee + devFee + charityFee;
 
-    address public _marketingWalletAddress = address(0x0);
+    address payable public _marketingWallet = payable(address(0x123));
+    address payable public _devWallet = payable(address(0x456));
+    address payable public _charityWallet = payable(address(0x789));
 
 
     // use by default 300,000 gas to process auto-claiming dividends
@@ -49,6 +48,9 @@ contract JEWEL is ERC20, Ownable {
 
      // exlcude from fees and max transaction amount
     mapping (address => bool) private _isExcludedFromFees;
+
+    // Whether claim in BNB or BTC
+    mapping(address => bool) public claimInBTC;
 
 
     // store addresses that a automatic market maker pairs. Any transfer *to* these addresses
@@ -74,10 +76,12 @@ contract JEWEL is ERC20, Ownable {
         uint256 tokensIntoLiqudity
     );
 
-    event SendDividends(
-    	uint256 tokensSwapped,
-    	uint256 amount
-    );
+    event SendDividends(uint256 amount);
+    event SendLottery(uint256 amount);
+
+    event SendWalletFees(uint256 marketingShare, 
+        uint256 devShare, 
+        uint256 charityShare);
 
     event ProcessedDividendTracker(
     	uint256 iterations,
@@ -93,9 +97,9 @@ contract JEWEL is ERC20, Ownable {
         _;
     }
 
-    constructor() ERC20("JEWEL TOKEN", "JWLS") {
+    constructor() ERC20("Jester TOKEN", "JWLS") {
 
-    	dividendTracker = new JEWELDividendTracker();
+    	dividendTracker = new JesterDividendTracker();
         lotteryTracker = new LotteryTracker();
 
 
@@ -118,20 +122,19 @@ contract JEWEL is ERC20, Ownable {
         dividendTracker.excludedFromDividends(address(lotteryTracker));
 
         lotteryTracker.excludedFromWeekly(uniswapV2Pair);
-        lotteryTracker.excludedFromMonthly(uniswapV2Pair);
-        lotteryTracker.excludedFromUltimate(uniswapV2Pair);
+        lotteryTracker.excludedFromWeekly(deadWallet);
+        lotteryTracker.excludedFromWeekly(address(this));
 
         // exclude from paying fees or having max transaction amount
         excludeFromFees(owner(), true);
-        excludeFromFees(_marketingWalletAddress, true);
+        excludeFromFees(_marketingWallet, true);
         excludeFromFees(address(this), true);
 
         /*
             _mint is an internal function in ERC20.sol that is only called here,
             and CANNOT be called ever again
         */
-        _mint(owner(), 1000000000 * (10**18));
-        IERC20(BUSD).approve(address(lotteryTracker),~uint256(0));
+        _mint(owner(), 1 * 10**9 * (10**18));
     }
 
     receive() external payable {
@@ -139,11 +142,11 @@ contract JEWEL is ERC20, Ownable {
   	}
 
     function updateDividendTracker(address newAddress) public onlyOwner {
-        require(newAddress != address(dividendTracker), "JEWEL: The dividend tracker already has that address");
+        require(newAddress != address(dividendTracker), "Jester: The dividend tracker already has that address");
 
-        JEWELDividendTracker newDividendTracker = JEWELDividendTracker(payable(newAddress));
+        JesterDividendTracker newDividendTracker = JesterDividendTracker(payable(newAddress));
 
-        require(newDividendTracker.owner() == address(this), "JEWEL: The new dividend tracker must be owned by the JEWEL token contract");
+        require(newDividendTracker.owner() == address(this), "Jester: The new dividend tracker must be owned by the Jester token contract");
 
         newDividendTracker.excludeFromDividends(address(newDividendTracker));
         newDividendTracker.excludeFromDividends(address(this));
@@ -156,7 +159,7 @@ contract JEWEL is ERC20, Ownable {
     }
 
     function updateUniswapV2Router(address newAddress) public onlyOwner {
-        require(newAddress != address(uniswapV2Router), "JEWEL: The router already has that address");
+        require(newAddress != address(uniswapV2Router), "Jester: The router already has that address");
         emit UpdateUniswapV2Router(newAddress, address(uniswapV2Router));
         uniswapV2Router = IUniswapV2Router02(newAddress);
         address _uniswapV2Pair = IUniswapV2Factory(uniswapV2Router.factory())
@@ -165,7 +168,7 @@ contract JEWEL is ERC20, Ownable {
     }
 
     function excludeFromFees(address account, bool excluded) public onlyOwner {
-        require(_isExcludedFromFees[account] != excluded, "JEWEL: Account is already excluded");
+        require(_isExcludedFromFees[account] != excluded, "Jester: Account is already excluded");
         _isExcludedFromFees[account] = excluded;
 
         emit ExcludeFromFees(account, excluded);
@@ -179,23 +182,27 @@ contract JEWEL is ERC20, Ownable {
         emit ExcludeMultipleAccountsFromFees(accounts, excluded);
     }
 
-    function setMarketingWallet(address payable wallet) external onlyOwner{
-        _marketingWalletAddress = wallet;
+    function setWallets(address marketing, address dev, address charity) external onlyOwner{
+        _marketingWallet = payable(marketing);
+        _devWallet = payable(dev);
+        _charityWallet = payable(charity);
     }
 
-    function setBUSDRewardsFee(uint8 value) external onlyOwner{
-        BUSDRewardsFee = value;
-        totalFees = BUSDRewardsFee + liquidityFee + marketingFee + lotteryFee;
+    function setrewardsFee(uint8 value) external onlyOwner{
+        rewardsFee = value;
+        totalFees = rewardsFee + liquidityFee + marketingFee + lotteryFee + devFee + charityFee;
     }
 
-    function setLiquiditFee(uint8 value) external onlyOwner{
+    function setLiquidityFee(uint8 value) external onlyOwner{
         liquidityFee = value;
-        totalFees = BUSDRewardsFee + liquidityFee + marketingFee + lotteryFee;
+        totalFees = rewardsFee + liquidityFee + marketingFee + lotteryFee + devFee + charityFee;
     }
 
-    function setMarketingFee(uint8 value) external onlyOwner{
-        marketingFee = value;
-        totalFees = BUSDRewardsFee + liquidityFee + marketingFee + lotteryFee;
+    function setWalletFees(uint8 marketing, uint8 dev, uint8 charity) external onlyOwner{
+        marketingFee = marketing;
+        devFee = dev;
+        charityFee = charity;
+        totalFees = rewardsFee + liquidityFee + marketingFee + lotteryFee + devFee + charityFee;
 
     }
 
@@ -203,18 +210,14 @@ contract JEWEL is ERC20, Ownable {
         isLotteryActive = value;
     }
 
-    function setLotteryFee(uint8 _weekly, uint8 _monthly, uint8 _ultimate) external onlyOwner{
-        weekly = _weekly;
-        monthly = _monthly;
-        ultimate = _ultimate;
-        lotteryFee = weekly + monthly + ultimate;
-        totalFees = BUSDRewardsFee + liquidityFee + marketingFee + lotteryFee;
+    function setLotteryFee(uint8 _lotteryFee) external onlyOwner{
+        lotteryFee = _lotteryFee;
+        totalFees = rewardsFee + liquidityFee + marketingFee + lotteryFee + devFee + charityFee;
 
     }
 
-
     function setAutomatedMarketMakerPair(address pair, bool value) public onlyOwner {
-        require(pair != uniswapV2Pair, "JEWEL: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
+        require(pair != uniswapV2Pair, "Jester: The PancakeSwap pair cannot be removed from automatedMarketMakerPairs");
 
         _setAutomatedMarketMakerPair(pair, value);
     }
@@ -225,7 +228,7 @@ contract JEWEL is ERC20, Ownable {
 
 
     function _setAutomatedMarketMakerPair(address pair, bool value) private {
-        require(automatedMarketMakerPairs[pair] != value, "JEWEL: Automated market maker pair is already set to that value");
+        require(automatedMarketMakerPairs[pair] != value, "Jester: Automated market maker pair is already set to that value");
         automatedMarketMakerPairs[pair] = value;
 
         if(value) {
@@ -237,8 +240,7 @@ contract JEWEL is ERC20, Ownable {
 
 
     function updateGasForProcessing(uint256 newValue) public onlyOwner {
-        require(newValue >= 200000 && newValue <= 500000, "JEWEL: gasForProcessing must be between 200,000 and 500,000");
-        require(newValue != gasForProcessing, "JEWEL: Cannot update gasForProcessing to same value");
+        require(newValue >= 200000 && newValue <= 500000, "Jester: gasForProcessing must be between 200,000 and 500,000");
         emit GasForProcessingUpdated(newValue, gasForProcessing);
         gasForProcessing = newValue;
     }
@@ -271,29 +273,17 @@ contract JEWEL is ERC20, Ownable {
 	    dividendTracker.excludeFromDividends(account);
 	}
 
+    function setClaimMode(bool value) external {
+	    dividendTracker.setClaimInBTC(msg.sender,value); //true - claim dividend in BTC
+	}
+
     function excludeFromWeekly(address account) external onlyOwner{
 	    lotteryTracker.excludeFromWeekly(account);
 	}
 
-    function excludeFromMonthly(address account) external onlyOwner{
-	    lotteryTracker.excludeFromMonthly(account);
-	}
-
-    function excludeFromUltimate(address account) external onlyOwner{
-	    lotteryTracker.excludeFromUltimate(account);
-	}
 	
-	function setMinValues(uint256 _weekly, uint256 _monthly, uint256 _ultimate) external onlyOwner {
-	    lotteryTracker.setMinValues(_weekly,_monthly,_ultimate);
-	}
-
-    function pickUltimateWinner() external onlyOwner{
-	    if(!isAlreadyCalled){ 
-                lotteryTracker.getRandomNumber();
-                isAlreadyCalled = true;
-            }else{
-                try lotteryTracker.pickUltimateWinner() {isAlreadyCalled = false;} catch {}
-            }
+	function setMinValues(uint256 _weekly) external onlyOwner {
+	    lotteryTracker.setMinValues(_weekly);
 	}
 
     function getAccountDividendsInfo(address account)
@@ -366,8 +356,10 @@ contract JEWEL is ERC20, Ownable {
         ) {
             swapping = true;
 
-            uint256 marketingTokens = contractTokenBalance.mul(marketingFee).div(totalFees);
-            swapAndSendToFee(marketingTokens);
+            contractTokenBalance = swapTokensAtAmount.div(10);
+
+            uint256 feeTokens = contractTokenBalance.mul(marketingFee + devFee + charityFee).div(totalFees);
+            swapAndSendToFee(feeTokens);
 
             uint256 swapTokens = contractTokenBalance.mul(liquidityFee).div(totalFees);
             swapAndLiquify(swapTokens);
@@ -387,7 +379,7 @@ contract JEWEL is ERC20, Ownable {
         }
 
         if(takeFee) {
-        	uint256 fees = amount.mul(totalFees).div(100);
+        	uint256 fees = amount.mul(totalFees).div(1000);
 
         	amount = amount.sub(fees);
 
@@ -412,16 +404,6 @@ contract JEWEL is ERC20, Ownable {
                 }
             
             }
-
-            if(block.timestamp >= lotteryTracker.lastMonthlyDistributed() + 30 days){
-                if(!isAlreadyCalled){
-                    lotteryTracker.getRandomNumber();
-                    isAlreadyCalled = true;
-                }else{
-                    try lotteryTracker.pickMonthlyWinners() {isAlreadyCalled = false;} catch {}
-                }
-            
-            }
         }
 
         if(!swapping) {
@@ -438,11 +420,43 @@ contract JEWEL is ERC20, Ownable {
 
     function swapAndSendToFee(uint256 tokens) private  {
 
-        uint256 initialBUSDBalance = IERC20(BUSD).balanceOf(address(this));
+        uint256 initialBalance = address(this).balance;
+        swapTokensForEth(tokens);
+        uint256 newBalance = address(this).balance.sub(initialBalance);
 
-        swapTokensForBUSD(tokens);
-        uint256 newBalance = (IERC20(BUSD).balanceOf(address(this))).sub(initialBUSDBalance);
-        IERC20(BUSD).transfer(_marketingWalletAddress, newBalance);
+        uint16 total = marketingFee + devFee + charityFee;
+
+        uint256 marketingShare = newBalance.mul(marketingFee).div(total);
+        uint256 devShare = newBalance.mul(devFee).div(total);
+        uint256 charityShare = newBalance.mul(charityFee).div(total);
+
+        _marketingWallet.transfer(marketingShare);
+        _devWallet.transfer(devShare);
+        _charityWallet.transfer(charityShare);
+
+        emit SendWalletFees(marketingShare, devShare, charityShare);
+    }
+
+    function swapAndSendDividendsAndLottery(uint256 tokens) private{
+        uint256 initialBalance = address(this).balance;
+        swapTokensForEth(tokens);
+        uint256 dividends = address(this).balance.sub(initialBalance);
+
+        uint256 lottery = dividends.mul(lotteryFee).div(lotteryFee + rewardsFee);
+        dividends = dividends.sub(lottery);
+
+        (bool dividendSuccess,) = address(dividendTracker).call{value: dividends}("");
+ 
+        if(dividendSuccess) {
+   	 		emit SendDividends(dividends);
+        }
+
+        (bool lotterySuccess,) = address(lotteryTracker).call{value: lottery}("");
+
+        if(lotterySuccess) {
+            emit SendLottery(lottery);
+        }
+
     }
 
     function swapAndLiquify(uint256 tokens) private {
@@ -490,24 +504,6 @@ contract JEWEL is ERC20, Ownable {
 
     }
 
-    function swapTokensForBUSD(uint256 tokenAmount) private {
-
-        address[] memory path = new address[](3);
-        path[0] = address(this);
-        path[1] = uniswapV2Router.WETH();
-        path[2] = BUSD;
-
-        _approve(address(this), address(uniswapV2Router), tokenAmount);
-
-        // make the swap
-        uniswapV2Router.swapExactTokensForTokensSupportingFeeOnTransferTokens(
-            tokenAmount,
-            0,
-            path,
-            address(this),
-            block.timestamp
-        );
-    }
 
     function addLiquidity(uint256 tokenAmount, uint256 ethAmount) private {
 
@@ -526,25 +522,9 @@ contract JEWEL is ERC20, Ownable {
 
     }
 
-    function swapAndSendDividendsAndLottery(uint256 tokens) private{
-        swapTokensForBUSD(tokens);
-        uint256 dividends = IERC20(BUSD).balanceOf(address(this));
-        uint256 lottery = dividends.mul(lotteryFee).div(lotteryFee + BUSDRewardsFee);
-        dividends = dividends.sub(lottery);
-
-        bool success = IERC20(BUSD).transfer(address(dividendTracker), dividends);
-
-        if (success) {
-            dividendTracker.distributeBUSDDividends(dividends);
-            emit SendDividends(tokens, dividends);
-        }
-
-        lotteryTracker.setLottery(IERC20(BUSD).balanceOf(address(this)));
-
-    }
 }
 
-contract JEWELDividendTracker is Ownable, DividendPayingToken {
+contract JesterDividendTracker is Ownable, DividendPayingToken {
     using SafeMath for uint256;
     using SafeMathInt for int256;
     using IterableMapping for IterableMapping.Map;
@@ -553,6 +533,7 @@ contract JEWELDividendTracker is Ownable, DividendPayingToken {
     uint256 public lastProcessedIndex;
 
     mapping (address => bool) public excludedFromDividends;
+    mapping (address => bool) public claimInBTC;
 
     mapping (address => uint256) public lastClaimTimes;
 
@@ -564,17 +545,18 @@ contract JEWELDividendTracker is Ownable, DividendPayingToken {
 
     event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-    constructor() DividendPayingToken("JEWEL_Dividen_Tracker", "JEWEL_Dividend_Tracker") {
+    constructor() DividendPayingToken("Jester_Dividen_Tracker", "Jester_Dividend_Tracker") {
     	claimWait = 3600;
         minimumTokenBalanceForDividends = 20000 * (10**18); //must hold 20000+ tokens
     }
 
     function _transfer(address, address, uint256) internal pure override {
-        require(false, "JEWEL_Dividend_Tracker: No transfers allowed");
+        require(false, "Jester_Dividend_Tracker: No transfers allowed");
     }
 
-    function withdrawDividend() public pure override {
-        require(false, "JEWEL_Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main JEWEL contract.");
+    function withdrawDividend(bool val) public pure override {
+        val = !val;
+        require(false, "Jester_Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main Jester contract.");
     }
 
     function excludeFromDividends(address account) external onlyOwner {
@@ -588,8 +570,8 @@ contract JEWELDividendTracker is Ownable, DividendPayingToken {
     }
 
     function updateClaimWait(uint256 newClaimWait) external onlyOwner {
-        require(newClaimWait >= 3600 && newClaimWait <= 86400, "JEWEL_Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
-        require(newClaimWait != claimWait, "JEWEL_Dividend_Tracker: Cannot update claimWait to same value");
+        require(newClaimWait >= 3600 && newClaimWait <= 86400, "Jester_Dividend_Tracker: claimWait must be updated to between 1 and 24 hours");
+        require(newClaimWait != claimWait, "Jester_Dividend_Tracker: Cannot update claimWait to same value");
         emit ClaimWaitUpdated(newClaimWait, claimWait);
         claimWait = newClaimWait;
     }
@@ -693,6 +675,10 @@ contract JEWELDividendTracker is Ownable, DividendPayingToken {
     	processAccount(account, true);
     }
 
+    function setClaimInBTC(address user, bool val) external onlyOwner {
+        claimInBTC[user] = val;
+    }
+
     function process(uint256 gas) public returns (uint256, uint256, uint256) {
     	uint256 numberOfTokenHolders = tokenHoldersMap.keys.length;
 
@@ -741,7 +727,7 @@ contract JEWELDividendTracker is Ownable, DividendPayingToken {
     }
 
     function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
-        uint256 amount = _withdrawDividendOfUser(account);
+        uint256 amount = _withdrawDividendOfUser(account,automatic);
 
     	if(amount > 0) {
     		lastClaimTimes[account] = block.timestamp;
