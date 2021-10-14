@@ -25,7 +25,7 @@ contract JesterToken is ERC20, Ownable {
     JesterDividendTracker public dividendTracker;
     LotteryTracker public lotteryTracker;
 
-    address private constant deadWallet = 0x000000000000000000000000000000000000dEaD;
+    address private constant deadWallet = address(0xdead);
 
     uint256 public swapTokensAtAmount = 2 * 10**6 * 10**18;
     uint256 public maxSellAmount = 5 * 10**5 * 10**18;
