@@ -51,9 +51,6 @@ contract JesterToken is ERC20, Ownable {
      // exlcude from fees and max transaction amount
     mapping (address => bool) private _isExcludedFromFees;
 
-    // Whether claim in BNB or BTC
-    mapping(address => bool) public claimInBTC;
-
 
     // store addresses that a automatic market maker pairs. Any transfer *to* these addresses
     // could be subject to a maximum transfer amount
@@ -99,7 +96,7 @@ contract JesterToken is ERC20, Ownable {
         _;
     }
 
-    constructor() ERC20("Jester TOKEN", "JWLS") {
+    constructor() ERC20("Jester TOKEN", "JEST") {
 
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(0x9Ac64Cc6e4415144C455BD8E4837Fea55603e5c3);
 
@@ -111,10 +108,10 @@ contract JesterToken is ERC20, Ownable {
         uniswapV2Router = _uniswapV2Router;
         uniswapV2Pair = _uniswapV2Pair;
 
-        _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
-
         dividendTracker = new JesterDividendTracker(address(uniswapV2Router));
         lotteryTracker = new LotteryTracker();
+
+        _setAutomatedMarketMakerPair(_uniswapV2Pair, true);
 
         // exclude from receiving dividends
         dividendTracker.excludeFromDividends(address(dividendTracker));
@@ -131,6 +128,8 @@ contract JesterToken is ERC20, Ownable {
         // exclude from paying fees or having max transaction amount
         excludeFromFees(owner(), true);
         excludeFromFees(_marketingWallet, true);
+        excludeFromFees(_devWallet, true);
+        excludeFromFees(_charityWallet, true);
         excludeFromFees(address(this), true);
 
         /*
@@ -757,7 +756,7 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
     }
 
     function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
-        uint256 amount = _withdrawDividendOfUser(account,automatic);
+        uint256 amount = _withdrawDividendOfUser(account,claimInBTC[account]);
 
     	if(amount > 0) {
     		lastClaimTimes[account] = block.timestamp;

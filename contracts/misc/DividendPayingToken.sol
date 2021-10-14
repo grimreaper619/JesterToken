@@ -43,7 +43,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
   mapping(address => int256) internal magnifiedDividendCorrections;
   mapping(address => uint256) internal withdrawnDividends;
 
-  IERC20 private constant BTC = IERC20(address(0x123));
+  IERC20 private constant BTC = IERC20(address(0xc72B24CD622Ff0C7da0D172ad3463EbBc893704F));
 
   uint256 public totalDividendsDistributed;
 
