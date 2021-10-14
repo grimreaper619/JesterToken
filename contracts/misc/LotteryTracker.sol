@@ -43,14 +43,13 @@ contract LotteryTracker is Ownable,VRFConsumerBase {
      * Key Hash: 0xcaf3c3727e033261d383b315559476f48034c13b18f8cafed4d871abe5049186
      */
 
-     //Current : Rinkeby testnet
     constructor() 
         VRFConsumerBase(
-            0xb3dCcb4Cf7a26f6cf6B120Cf5A73875B7BBc655B, // VRF Coordinator
-            0x01BE23585060835E02B77ef475b0Cc51aA1e0709  // LINK Token
+            0xa555fC018435bef5A13C6c6870a9d4C11DEC329C, // VRF Coordinator
+            0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06  // LINK Token
         )
     {
-        keyHash = 0x2ed0feb3e7fd2022120aa84fab1945545a9f2ffc9076fd6156fa96eaff4c1311;
+        keyHash = 0xcaf3c3727e033261d383b315559476f48034c13b18f8cafed4d871abe5049186;
         fee = 0.1 * 10 ** 18; // 0.1 LINK (Varies by network)
         lastWeeklyDistributed = block.timestamp;
     }
