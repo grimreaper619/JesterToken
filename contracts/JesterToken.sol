@@ -10,7 +10,6 @@ import '@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol';
 import '@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol';
 import "./misc/LotteryTracker.sol";
 
-
 contract JesterToken is ERC20, Ownable {
     using SafeMath for uint256;
 
