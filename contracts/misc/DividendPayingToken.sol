@@ -105,11 +105,16 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
     if (_withdrawableDividend > 0) {
       withdrawnDividends[user] = withdrawnDividends[user].add(_withdrawableDividend);
       emit DividendWithdrawn(user, _withdrawableDividend);
+
       if(choice == 1){
         swapBNBForBTC(_withdrawableDividend,user);
-      }else if(choice == 2){
+      }
+      else if(choice == 2)
+      {
         swapBNBForNative(_withdrawableDividend, user);
-      }else{
+      }
+      else
+      {
         (bool success,) = user.call{value: _withdrawableDividend, gas: 3000}("");
 
         if(!success) {
@@ -120,6 +125,7 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
       
 
       return _withdrawableDividend;
+      
     }
 
     return 0;
