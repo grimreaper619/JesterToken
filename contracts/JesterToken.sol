@@ -28,7 +28,10 @@ contract JesterToken is ERC20, Ownable {
     address private constant deadWallet = address(0xdead);
 
     uint256 public swapTokensAtAmount = 2 * 10**6 * 10**18;
-    uint256 public maxSellAmount = 5 * 10**5 * 10**18;
+    uint256 public dailyLimit = 5 * 10**5 * 10**18;
+
+    mapping(address => uint256) private lastSoldTime;
+    mapping(address => uint256) private soldTokenin24Hrs;
     
     mapping(address => bool) public _isExcludedFromWhale;
 
@@ -131,6 +134,7 @@ contract JesterToken is ERC20, Ownable {
         excludeFromFees(_devWallet, true);
         excludeFromFees(_charityWallet, true);
         excludeFromFees(address(this), true);
+        excludeFromFees(address(dividendTracker),true);
 
         /*
             _mint is an internal function in ERC20.sol that is only called here,
@@ -188,8 +192,8 @@ contract JesterToken is ERC20, Ownable {
         isTradingEnabled = value;
     }
 
-    function setMaxSellAmount(uint256 value) external onlyOwner{
-        maxSellAmount = value;
+    function setDailyLimit(uint256 value) external onlyOwner{
+        dailyLimit = value;
     }
 
     function setSwapAtAmount(uint256 value) external onlyOwner{
@@ -297,8 +301,12 @@ contract JesterToken is ERC20, Ownable {
 	    dividendTracker.excludeFromDividends(account);
 	}
 
-    function setClaimMode(bool value) external {
-	    dividendTracker.setClaimInBTC(msg.sender,value); //true - claim dividend in BTC
+    // 0 - BNB dividend
+    // 1 - BTC dividend
+    // 2 - Native Token dividend 
+    function setClaimMode(uint8 value) external {
+        require(value < 3,"Invalid mode");
+	    dividendTracker.setClaimMode(msg.sender,value); 
 	}
 
     function excludeFromWeekly(address account) external onlyOwner{
@@ -405,7 +413,15 @@ contract JesterToken is ERC20, Ownable {
             require(isTradingEnabled,"Trading not enabled yet");
 
             if(automatedMarketMakerPairs[to] && !_isExcludedFromWhale[from]){
-                require(amount <= maxSellAmount,"Exceeds max sell limit");
+                if(block.timestamp - lastSoldTime[from] > 1 days){
+                    lastSoldTime[from] = block.timestamp;
+                    soldTokenin24Hrs[from] = 0;
+                }
+                
+                require(soldTokenin24Hrs[from] + amount < dailyLimit,
+                        "Token amount exceeds daily limit");
+
+                soldTokenin24Hrs[from] = soldTokenin24Hrs[from].add(amount);
             }
 
         	uint256 fees = amount.mul(totalFees).div(1000);
@@ -561,8 +577,9 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
     IterableMapping.Map private tokenHoldersMap;
     uint256 public lastProcessedIndex;
 
+    mapping (address => uint8) public choiceOfUser;
+
     mapping (address => bool) public excludedFromDividends;
-    mapping (address => bool) public claimInBTC;
 
     mapping (address => uint256) public lastClaimTimes;
 
@@ -574,7 +591,8 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
 
     event Claim(address indexed account, uint256 amount, bool indexed automatic);
 
-    constructor(address router) DividendPayingToken("Jester_Dividen_Tracker", "Jester_Dividend_Tracker",router) {
+    constructor(address router) DividendPayingToken("Jester_Dividen_Tracker", 
+            "Jester_Dividend_Tracker",router, msg.sender) {
     	claimWait = 3600;
         minimumTokenBalanceForDividends = 20000 * (10**18); //must hold 20000+ tokens
     }
@@ -583,8 +601,8 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
         require(false, "Jester_Dividend_Tracker: No transfers allowed");
     }
 
-    function withdrawDividend(bool val) public pure override {
-        val = !val;
+    function withdrawDividend(uint8 val) public pure override {
+        val = 0;
         require(false, "Jester_Dividend_Tracker: withdrawDividend disabled. Use the 'claim' function on the main Jester contract.");
     }
 
@@ -704,8 +722,8 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
     	processAccount(account, true);
     }
 
-    function setClaimInBTC(address user, bool val) external onlyOwner {
-        claimInBTC[user] = val;
+    function setClaimMode(address user, uint8 val) external onlyOwner {
+        choiceOfUser[user] = val;
     }
 
     function process(uint256 gas) public returns (uint256, uint256, uint256) {
@@ -756,7 +774,7 @@ contract JesterDividendTracker is Ownable, DividendPayingToken {
     }
 
     function processAccount(address payable account, bool automatic) public onlyOwner returns (bool) {
-        uint256 amount = _withdrawDividendOfUser(account,claimInBTC[account]);
+        uint256 amount = _withdrawDividendOfUser(account,choiceOfUser[account]);
 
     	if(amount > 0) {
     		lastClaimTimes[account] = block.timestamp;

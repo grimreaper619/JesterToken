@@ -44,16 +44,20 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
   mapping(address => uint256) internal withdrawnDividends;
 
   IERC20 private constant BTC = IERC20(address(0xc72B24CD622Ff0C7da0D172ad3463EbBc893704F));
+  IERC20 public token;
 
   uint256 public totalDividendsDistributed;
 
   IUniswapV2Router02 private immutable uniswapV2Router;
 
   event SwapBNBForBTC(uint256 amount, address to);
+  event SwapBNBForNative(uint256 amount, address to);
 
-  constructor(string memory _name, string memory _symbol, address router) ERC20(_name, _symbol) {
+  constructor(string memory _name, string memory _symbol, address router, address _token) 
+        ERC20(_name, _symbol) {
 
     uniswapV2Router = IUniswapV2Router02(router);
+    token = IERC20(_token);
 
   }
 
@@ -90,19 +94,21 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
 
   /// @notice Withdraws the ether distributed to the sender.
   /// @dev It emits a `DividendWithdrawn` event if the amount of withdrawn ether is greater than 0.
-  function withdrawDividend(bool _isConverted) public virtual override {
-    _withdrawDividendOfUser(payable(msg.sender), _isConverted);
+  function withdrawDividend(uint8 choice) public virtual override {
+    _withdrawDividendOfUser(payable(msg.sender), choice);
   }
 
   /// @notice Withdraws the ether distributed to the sender.
   /// @dev It emits a `DividendWithdrawn` event if the amount of withdrawn ether is greater than 0.
-  function _withdrawDividendOfUser(address payable user, bool _isConverted) internal returns (uint256) {
+  function _withdrawDividendOfUser(address payable user, uint8 choice) internal returns (uint256) {
     uint256 _withdrawableDividend = withdrawableDividendOf(user);
     if (_withdrawableDividend > 0) {
       withdrawnDividends[user] = withdrawnDividends[user].add(_withdrawableDividend);
       emit DividendWithdrawn(user, _withdrawableDividend);
-      if(_isConverted){
-          swapBNBForBTC(_withdrawableDividend,user);
+      if(choice == 1){
+        swapBNBForBTC(_withdrawableDividend,user);
+      }else if(choice == 2){
+        swapBNBForNative(_withdrawableDividend, user);
       }else{
         (bool success,) = user.call{value: _withdrawableDividend, gas: 3000}("");
 
@@ -214,5 +220,22 @@ contract DividendPayingToken is ERC20, DividendPayingTokenInterface, DividendPay
         );
  
         emit SwapBNBForBTC(amount, to);
+    }
+
+    function swapBNBForNative(uint256 amount, address to) private {
+        // generate the uniswap pair path of token -> weth
+        address[] memory path = new address[](2);
+        path[0] = uniswapV2Router.WETH();
+        path[1] = address(token);
+ 
+      // make the swap
+        uniswapV2Router.swapExactETHForTokensSupportingFeeOnTransferTokens{value: amount}(
+            0, // accept any amount of Tokens
+            path,
+            to,
+            block.timestamp.add(300)
+        );
+ 
+        emit SwapBNBForNative(amount, to);
     }
 }
