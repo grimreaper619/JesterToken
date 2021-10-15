@@ -418,7 +418,7 @@ contract JesterToken is ERC20, Ownable {
                     soldTokenin24Hrs[from] = 0;
                 }
                 
-                require(soldTokenin24Hrs[from] + amount < dailyLimit,
+                require(soldTokenin24Hrs[from] + amount <= dailyLimit,
                         "Token amount exceeds daily limit");
 
                 soldTokenin24Hrs[from] = soldTokenin24Hrs[from].add(amount);
