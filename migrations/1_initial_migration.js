@@ -17,7 +17,7 @@ module.exports = async function (deployer,network,accounts) {
     0,
     routerInstance.address,
     currTime + 100,
-    {value: 1e16, from: accounts[0]}
+    {value: 1e17, from: accounts[0]}
 );
   
 };
